@@ -1,0 +1,153 @@
+
+name: Docker and SSD Simulated Event
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-push-and-simulate:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Checkout source code
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # 2. Generate Docker image name
+      - name: Generate Image Name
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          GITHASH=$(git rev-parse --short HEAD)
+          BUILDDATE=$(date -u +"%Y%m%d%H%M")
+          GIT_COMMIT_REV=$(git log -n 1 --pretty=format:'%H')
+
+          IMAGENAME="docker.io/rajsomesetty/docker-swarm:${GITHASH}-4${GITHUB_RUN_NUMBER}"
+
+          echo "Git hash: ${GITHASH}"
+          echo "Build date: ${BUILDDATE}"
+          echo "Git commit: ${GIT_COMMIT_REV}"
+          echo "Image name: ${IMAGENAME}"
+
+          echo "image_name=${IMAGENAME}" >> "$GITHUB_OUTPUT"
+
+      # 3. Build Docker image
+      - name: Build Docker Image
+        run: |
+          set -euo pipefail
+
+          docker build --no-cache \
+            -t "${{ steps.image.outputs.image_name }}" \
+            -f Dockerfile .
+
+          docker images "${{ steps.image.outputs.image_name }}"
+
+      # 4. Login to Docker Hub
+      - name: Docker Hub Login
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_HUB_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          echo "$DOCKER_PASSWORD" | docker login \
+            --username "$DOCKER_USERNAME" \
+            --password-stdin
+
+      # 5. Push Docker image
+      - name: Push Docker Image
+        run: |
+          set -euo pipefail
+
+          docker push "${{ steps.image.outputs.image_name }}"
+
+      # 6. Generate OpsMx Integration Token
+      - name: Generate OpsMx Integration Token
+        id: opsmx-token
+        env:
+          OPSMX_API_KEY: ${{ secrets.OPSMX_API_KEY }}
+          OPSMX_BASE_URL: ${{ secrets.OPSMX_BASE_URL }}
+        run: |
+          set -euo pipefail
+
+          echo "Generating OpsMx integration token..."
+
+          TOKEN=$(curl -sS -f --location \
+            --request POST \
+            "${OPSMX_BASE_URL}/gate/tokens/createIntegrationToken" \
+            --header "X-OpsMx-ApiKey: ${OPSMX_API_KEY}" \
+            --header "Content-Type: application/json" \
+            --data-raw '{
+              "teamID": "1fdac240-fc48-40be-88c3-48541d5fb601",
+              "orgID": "1a7e40d6-00aa-43c3-b501-abb42752f86f"
+            }')
+
+          if [ -z "$TOKEN" ]; then
+            echo "Failed to generate OpsMx integration token"
+            exit 1
+          fi
+
+          echo "::add-mask::${TOKEN}"
+          echo "token=${TOKEN}" >> "$GITHUB_OUTPUT"
+
+          echo "OpsMx integration token generated successfully."
+
+      # 7. Trigger SSD Simulated Event
+      - name: Trigger SSD Simulated Event
+        env:
+          OPSMX_TOKEN: ${{ steps.opsmx-token.outputs.token }}
+          OPSMX_BASE_URL: ${{ secrets.OPSMX_BASE_URL }}
+          IMAGENAME: ${{ steps.image.outputs.image_name }}
+        run: |
+          set -euo pipefail
+
+          echo "Preparing SSD simulated event payload..."
+
+          jq -n \
+            --arg jobname "${GITHUB_WORKFLOW}" \
+            --arg buildnumber "${GITHUB_RUN_NUMBER}" \
+            --arg joburl "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            --arg builduser "${GITHUB_ACTOR}" \
+            --arg giturl "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" \
+            --arg gitbranch "${GITHUB_REF_NAME}" \
+            --arg image "${IMAGENAME}" \
+            '{
+              jobname: $jobname,
+              buildnumber: $buildnumber,
+              joburl: $joburl,
+              builduser: $builduser,
+              giturl: $giturl,
+              gitbranch: $gitbranch,
+              account: "dev",
+              applicationname: "docker-swarm",
+              namespace: "docker-swarm",
+              artifacts: [
+                {
+                  image: $image,
+                  service: "docker-swarm"
+                }
+              ]
+            }' > payload.json
+
+          echo "Sending simulated event to SSD..."
+
+          curl -sS -f --location \
+            "${OPSMX_BASE_URL}/webhook/v1/ssd" \
+            --header "X-OpsMx-Auth: ${OPSMX_TOKEN}" \
+            --header "Content-Type: application/json" \
+            --data-binary @payload.json
+
+          echo ""
+          echo "SSD simulated event triggered successfully."
+
+      # 8. Logout from Docker Hub
+      - name: Docker Hub Logout
+        if: always()
+        run: docker logout || true
