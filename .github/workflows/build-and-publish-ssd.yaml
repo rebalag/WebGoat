@@ -85,8 +85,8 @@ jobs:
             --header "X-OpsMx-ApiKey: ${OPSMX_API_KEY}" \
             --header "Content-Type: application/json" \
             --data-raw '{
-              "teamID": "1fdac240-fc48-40be-88c3-48541d5fb601",
-              "orgID": "1a7e40d6-00aa-43c3-b501-abb42752f86f"
+              "teamID": "d917d0fe-ff28-4a84-bdbf-de522574527b",
+              "orgID": "baa262a3-3709-4643-b145-13c45362d14e"
             }')
 
           if [ -z "$TOKEN" ]; then
@@ -125,13 +125,13 @@ jobs:
               builduser: $builduser,
               giturl: $giturl,
               gitbranch: $gitbranch,
-              account: "dev",
-              applicationname: "docker-swarm",
-              namespace: "docker-swarm",
+              account: "default-git",
+              applicationname: "test-utkarsh",
+              namespace: "test-utkarsh",
               artifacts: [
                 {
                   image: $image,
-                  service: "docker-swarm"
+                  service: "webgoat"
                 }
               ]
             }' > payload.json
