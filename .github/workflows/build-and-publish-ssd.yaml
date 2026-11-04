@@ -29,7 +29,7 @@ jobs:
           BUILDDATE=$(date -u +"%Y%m%d%H%M")
           GIT_COMMIT_REV=$(git log -n 1 --pretty=format:'%H')
 
-          IMAGENAME="docker.io/rajsomesetty/docker-swarm:${GITHASH}-4${GITHUB_RUN_NUMBER}"
+          IMAGENAME="docker.io/rebala/webgoat:${GITHASH}-4${GITHUB_RUN_NUMBER}"
 
           echo "Git hash: ${GITHASH}"
           echo "Build date: ${BUILDDATE}"
